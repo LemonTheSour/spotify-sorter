@@ -1,93 +1,69 @@
 """Module providing a function"""
-import os
-import base64
-import json
-import webbrowser
-import urllib.parse
+import spotipy
 
-from requests import post, get
+from spotipy.oauth2 import SpotifyOAuth
 from dotenv import load_dotenv
 
 load_dotenv()
 
-client_id = os.getenv("CLIENT_ID")
-client_secret = os.getenv("CLIENT_SECRET")
-redirect_uri = "http://localhost:7777/callback"
-scope = "user-read-private%20user-read-email"
+SCOPE = "user-read-private,user-read-email,playlist-modify-public,playlist-modify-private"
 
-def get_token():
-    """Function allowing us to get the token from the spotify API"""
-    auth_string = client_id + ":" + client_secret
-    auth_bytes = auth_string.encode("utf-8")
-    auth_base64 = str(base64.b64encode(auth_bytes), "utf-8")
+# playlist_add_items(playlist_id, items, position=None) ------ Add items to a playlist
+# playlist_tracks(playlist_id, fields=None, limit=100, offset=0, market=None, additional_types=('track', 'episode') ------- Get full details of a playlist
+# playlist_remove_all_occurrences_of_items(playlist_id, items, snapshot_id=None) --------- Remove items from playlist
 
-    url = "https://accounts.spotify.com/api/token"
-    headers = {
-        "Authorization": "Basic " + auth_base64,
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
-    data = {"grant_type": "client_credentials"}
-    result = post(url, headers=headers, data=data, timeout=3.00)
-    json_result = json.loads(result.content)
-    return_token = json_result["access_token"]
-    return return_token
+sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=SCOPE))
+user = sp.current_user()
+userID = user["id"]
 
-def get_authorize_token():
-    """Function allowing us to get an authorized token from the spotify API"""
-    auth_string = client_id + ":" + client_secret
-    auth_bytes = auth_string.encode("utf-8")
-    auth_base64 = str(base64.b64encode(auth_bytes), "utf-8")
-    endpoint = "https://accounts.spotify.com/api/token"
+# playlists = sp.user_playlists(userID)
+#print(playlists["items"][0])
 
-    auth_headers = {
-        "client_id": client_id,
-        "response_type": "code",
-        "redirect_uri": "http://localhost:7777/callback",
-        "scope": "user-read-private user-read-email"
-    }
-    webbrowser.open("https://accounts.spotify.com/authorize?" + urllib.parse.urlencode(auth_headers))
 
-def get_auth_header(token):
-    """Function which constructs a header for post requests"""
-    return {"Authorization": "Bearer " + token}
+def get_user_id():
+    """Function to return the ID of the current user"""
+    return sp.current_user()["id"]
 
-def search_for_artist(token, artist_name):
-    """Function which searches for an artist"""
-    url = "https://api.spotify.com/v1/search"
-    headers = get_auth_header(token)
-    query = f"q={artist_name}&type=artist&limit=1"
+def get_playlists(user_id):
+    """Function to return the target playlists Lucy and Lucille for reorganising"""
+    playlists = sp.user_playlists(user_id)["items"]
+    target_playlists = []
 
-    query_url = url + "?" + query
-    result = get(query_url, headers=headers, timeout=3.00)
-    json_result = json.loads(result.content)["artists"]["items"]
-    if len(json_result) == 0:
-        print("No artist with this name exists...")
-        return None
+    for item in playlists:
+        if item["name"] == "Lucy" or item["name"] == "Lucille":
+            target_playlists.append(item)
 
-    return json_result[0]
+    if(target_playlists[0]["name"] == "Lucy"):
+        lucy = target_playlists[0]
+        lucille = target_playlists[1]
+    else:
+        lucy = target_playlists[1]
+        lucille = target_playlists[0]
 
-def get_songs_by_artist(token, artist_id):
-    """Function which returns songs by a given artist"""
-    url = f"https://api.spotify.com/v1/artists/{artist_id}/top-tracks?country=US"
-    headers = get_auth_header(token)
-    result = get(url, headers=headers, timeout=3.00)
-    json_result = json.loads(result.content)["tracks"]
-    return json_result
+    return lucy, lucille
 
-def get_profile(token, user_id):
-    """Function which retrieves a profile"""
-    url = f"https://api.spotify.com/v1/users/{user_id}"
-    headers = get_auth_header(token)
-    result = get(url, headers=headers, timeout=3.00)
-    return result
+def check_length(playlist):
+    """Function for checking the length of a playlist"""
+    return playlist["tracks"]["total"]
 
-def get_current_user(token):
-    """Function to retrieve current user"""
-    url = "https://api.spotify.com/v1/me"
-    headers = get_auth_header(token)
-    result = get(url, headers=headers, timeout=3.00)
-    print(result.content)
-   # return json_result
+def get_tracks_to_add(playlist, num):
+    """Function for getting a list of track ids in a playlist"""
+    playlist_id = playlist["id"]
+    tracks_data = sp.playlist_tracks(playlist_id)["items"]
+    tracks = []
 
-auth_token = get_token()
-get_authorize_token()
+    for idx, val in enumerate(tracks_data):
+        tracks.append(val["track"]["uri"])
+
+    return tracks[:num]
+
+userID = get_user_id()
+lucy, lucille = get_playlists(userID)
+
+lucille_length = check_length(lucille)
+difference = lucille_length - 50
+
+if difference != 0:
+    tracks_to_transfer = get_tracks_to_add(lucille["id"], difference)
+    sp.playlist_add_items(lucy["id"], tracks_to_transfer)
+    sp.playlist_remove_all_occurrences_of_items(lucy["id"], tracks_to_transfer)
